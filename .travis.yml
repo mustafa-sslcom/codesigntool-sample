@@ -1,0 +1,61 @@
+arch: amd64
+
+language: java
+os: linux
+dist: bionic
+
+env:
+  global:
+    - ENVIRONMENT_NAME="TEST" #PROD
+
+stages:
+  - build
+  - sign
+
+jobs:
+  include:
+    - stage: build
+      name: build-maven
+      dist: bionic
+      language: java
+      jdk:
+        - oraclejdk17
+      cache:
+        directories:
+          - $HOME/.m2
+      before_script: 
+        - mkdir -p ${TRAVIS_BUILD_DIR}/artifacts
+        - mkdir -p ${TRAVIS_BUILD_DIR}/packages
+        - export MAVEN_CLI_OPTS="--batch-mode --errors --fail-at-end --show-version -DinstallAtEnd=true -DdeployAtEnd=true"
+      script: 
+        - mvn $MAVEN_CLI_OPTS clean install -f pom.xml
+        - cp target/HelloWorld-0.0.1.jar ${TRAVIS_BUILD_DIR}/packages/HelloWorld.jar
+      workspaces:
+        create:
+          name: maven-jar-artifacts
+          paths:
+            - ${TRAVIS_BUILD_DIR}/packages/HelloWorld.jar
+
+    - stage: sign
+      name: sign-jar-file
+      dist: bionic
+      services:
+        - docker
+      language: java
+      jdk:
+        - oraclejdk17
+      before_script: 
+        - mkdir -p ${TRAVIS_BUILD_DIR}/artifacts
+        - mkdir -p ${TRAVIS_BUILD_DIR}/packages
+      script: 
+        - docker pull ghcr.io/bayrakmustafa/codesigner:latest
+        - docker run -i --rm --dns 8.8.8.8 --network host --volume ${TRAVIS_BUILD_DIR}/packages:/codesign/examples --volume ${TRAVIS_BUILD_DIR}/artifacts:/codesign/output
+          -e USERNAME=${USERNAME} -e PASSWORD=${PASSWORD} -e CREDENTIAL_ID=${CREDENTIAL_ID} -e TOTP_SECRET=${TOTP_SECRET} -e ENVIRONMENT_NAME=${ENVIRONMENT_NAME} 
+          ghcr.io/bayrakmustafa/codesigner:latest sign -input_file_path=/codesign/examples/HelloWorld.jar -output_dir_path=/codesign/output
+      workspaces:
+        use:
+         - maven-jar-artifacts
+        create:
+          name: signed-jar-file
+          paths:
+            - ${TRAVIS_BUILD_DIR}/artifacts/HelloWorld.jar
